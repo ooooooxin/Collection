@@ -190,15 +190,37 @@ async function parseDomData(platform) {
     const priceEl = document.querySelector('.price-num') || document.querySelector('.price-text') || document.querySelector('.offer-price');
     if (priceEl) data.price = priceEl.textContent.trim().replace(/[^0-9.]/g, '');
 
-    // 获取轮播主图
+    // 1. 提取轮播主图 (高容错设计)
     const imgElements = Array.from(document.querySelectorAll('.detail-gallery img, .detail-gallery-img img, .prop-img img, .nav-slider-img img, img.detail-gallery-img'));
-    const rawImgs = imgElements.map(img => {
+    let rawImgs = imgElements.map(img => {
       return img.getAttribute('src') || img.getAttribute('lazy-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-src');
     }).filter(Boolean);
     
-    data.images = [...new Set(rawImgs.map(get1688HighResUrl))];
+    let cleanImgs = [...new Set(rawImgs.map(get1688HighResUrl))].filter(Boolean);
 
-    // 获取详情图
+    // 降维兜底：如果常规 CSS 选择器抓取到的主图过少，直接扫描全页面 ibank 大图资源
+    if (cleanImgs.length < 2) {
+      console.log('1688 CSS selectors matched fewer than 2 images, running full-page ibank scanner...');
+      const allPageImgs = Array.from(document.querySelectorAll('img')).map(img => {
+        return img.getAttribute('src') || img.getAttribute('lazy-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-src');
+      }).filter(Boolean);
+
+      const ibankImgs = allPageImgs.filter(src => {
+        const lowercaseSrc = src.toLowerCase();
+        return (lowercaseSrc.includes('cbu01.alicdn.com/img/ibank/') || lowercaseSrc.includes('img.alicdn.com/')) &&
+               !lowercaseSrc.includes('logo') && !lowercaseSrc.includes('icon') && !lowercaseSrc.includes('loading') && !lowercaseSrc.includes('avatar');
+      });
+
+      const highResIbanks = [...new Set(ibankImgs.map(get1688HighResUrl))].filter(Boolean);
+      // 前 5 个不重复的 ibank 图片通常 99% 就是主图轮播图
+      if (highResIbanks.length > 0) {
+        cleanImgs = highResIbanks.slice(0, 5);
+      }
+    }
+    
+    data.images = cleanImgs;
+
+    // 2. 提取详情图 (通过 Background 代理 fetch 以规避 CSP 限制)
     try {
       const htmlText = document.documentElement.outerHTML;
       const descUrlMatch = htmlText.match(/["'](https?:)?\/\/desc\.1688\.com\/fdesc\/[^"'\s]+["']/i) || 
@@ -216,10 +238,14 @@ async function parseDomData(platform) {
       }
 
       if (descUrl) {
-        const descRes = await fetch(descUrl);
-        if (descRes.ok) {
-          const descText = await descRes.text();
-          // 提取 ibank 类型的图片 URL 并高清化
+        console.log('Fetching 1688 description via background proxy:', descUrl);
+        // 使用 Background 代理获取描述，解决前台跨域和 CSP 限制问题
+        const response = await new Promise(resolve => {
+          chrome.runtime.sendMessage({ action: 'proxyFetchText', url: descUrl }, resolve);
+        });
+
+        if (response && response.success && response.text) {
+          const descText = response.text;
           const ibankMatches = [...descText.matchAll(/(https?:)?\/\/cbu01\.alicdn\.com\/img\/ibank\/[^\s"'\\]+/gi)];
           const detailImgs = ibankMatches.map(m => get1688HighResUrl(m[0].replace(/\\/g, '')));
           if (detailImgs.length > 0) {

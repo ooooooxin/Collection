@@ -41,6 +41,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // 异步响应
   }
 
+  if (request.action === 'proxyFetchText') {
+    fetch(request.url)
+      .then(res => res.text())
+      .then(text => sendResponse({ success: true, text }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true; // 异步响应
+  }
+
   if (request.action === 'startBatchScrape') {
     // 启动批量采集任务
     handleBatchScrape(request.urls, request.userLevel)
