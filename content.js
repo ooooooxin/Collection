@@ -298,9 +298,29 @@ async function parseDomData(platform) {
 
         if (response && response.success && response.text) {
           const descText = response.text;
-          const ibankMatches = [...descText.matchAll(/(https?:)?\/\/cbu01\.alicdn\.com\/img\/ibank\/[^\s"'\\]+/gi)];
-          // 过滤掉 SVG 图片
-          const detailImgs = ibankMatches.map(m => get1688HighResUrl(m[0].replace(/\\/g, ''))).filter(url => !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
+          // 全面升级：正则提取 HTML 中所有的图片 src 属性，不再限死 ibank 域名以兼容天猫/淘宝 CDN 域名
+          const detailImgs = [];
+          const imgRegex = /(?:src|data-lazyload|data-src)\s*=\s*\\?["']([^"'\s]+?)\\?["']/gi;
+          let match;
+          while ((match = imgRegex.exec(descText)) !== null) {
+            let imgUrl = match[1].replace(/\\/g, '');
+            if (imgUrl.startsWith('//')) {
+              imgUrl = 'https:' + imgUrl;
+            }
+            const lowerUrl = imgUrl.toLowerCase();
+            // 只保留托管在阿里/天猫/淘宝 CDN 上的主图，且排查所有 gif 占位图和 svg
+            if (
+              lowerUrl.includes('alicdn.com') && 
+              !lowerUrl.endsWith('.svg') && 
+              !lowerUrl.includes('/svg/') &&
+              !lowerUrl.endsWith('.gif') &&
+              !lowerUrl.includes('space.gif') &&
+              !lowerUrl.includes('shim.gif')
+            ) {
+              detailImgs.push(get1688HighResUrl(imgUrl));
+            }
+          }
+
           if (detailImgs.length > 0) {
             data.description = detailImgs.map(img => `<img src="${img}" />`).join('\n');
             if (data.images.length === 0) {
