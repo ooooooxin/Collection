@@ -1,0 +1,38 @@
+{
+  "shopify": {
+    "url_pattern": "/products/",
+    "parser_type": "json_api"
+  },
+  "shopline": {
+    "url_pattern": "/products/",
+    "parser_type": "json_api"
+  },
+  "amazon": {
+    "url_pattern": "amazon\\.(com|co\\.uk|de|co\\.jp|ca|fr|it|es|com\\.au)/dp/|/gp/product/",
+    "parser_type": "dom",
+    "selectors": {
+      "title": "#productTitle",
+      "price": ".a-price .a-offscreen, #price_inside_buybox, #priceblock_ourprice",
+      "description": "#feature-bullets, #productDescription_feature_div",
+      "images": "#landingImage, #imgBlkFront"
+    }
+  },
+  "aliexpress": {
+    "url_pattern": "aliexpress\\.com/item/\\d+\\.html",
+    "parser_type": "global_var",
+    "selectors": {
+      "title": ".slider--title--2c22L0v, h1",
+      "price": ".price--currentPriceText--2CH15tC",
+      "images": ".slider--img--1R2u8aH img"
+    }
+  },
+  "1688": {
+    "url_pattern": "1688\\.com/offer/\\d+\\.html",
+    "parser_type": "dom",
+    "selectors": {
+      "title": "h1, .title-text, .od-pc-offer-title",
+      "price": ".price-num, .price-text, .od-pc-offer-price",
+      "images": ".detail-gallery-img img, .prop-img img"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "跨境智采 - 跨境电商商品采集助手",
+  "version": "1.0.0",
+  "description": "一键采集 Shopify、店匠、Amazon、1688、AliExpress 商品数据，媒体资产本地打包 (ZIP)，WebP转JPG，支持批量链接采集、Excel 批量导入及 Shopify/Shopline 格式 CSV 导出。",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "downloads",
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "跨境智采",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ]
+}

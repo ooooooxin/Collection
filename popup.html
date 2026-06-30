@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>跨境智采</title>
+  <link rel="stylesheet" href="popup.css">
+  <!-- 引入 Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- 顶部 Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <span class="logo-icon">S</span>
+        <span class="logo-text">跨境智采 <span class="logo-sub">v1.0</span></span>
+      </div>
+      <div class="user-status-card">
+        <span id="userLevelBadge" class="badge badge-free">免费会员</span>
+        <button id="btnSwitchUser" class="btn-micro">切换账号</button>
+      </div>
+    </header>
+
+    <!-- 顶层状态栏 -->
+    <div id="sniffBar" class="sniff-bar deactivated">
+      <div class="pulse-indicator"></div>
+      <span id="sniffText">未检测到支持的商品页面</span>
+      <button id="btnQuickScrape" class="btn-quick disabled" disabled>一键采集</button>
+    </div>
+
+    <!-- 选项卡导航 -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="tab-single">单品采集</button>
+      <button class="tab-btn" data-tab="tab-batch">批量链接</button>
+      <button class="tab-btn" data-tab="tab-excel">Excel导入</button>
+      <button class="tab-btn" data-tab="tab-category">类目抓取</button>
+      <button class="tab-btn" data-tab="tab-settings">云端设置</button>
+    </nav>
+
+    <!-- 主体内容区 -->
+    <main class="tab-content">
+      
+      <!-- 1. 单品采集面板 -->
+      <section id="tab-single" class="tab-panel active">
+        <div id="singleEmptyState" class="empty-state">
+          <p>请在 Shopify、店匠、Amazon、1688 或 AliExpress 商品详情页点击“一键采集”获取数据</p>
+        </div>
+        <div id="singleDataPanel" class="data-panel hidden">
+          <div class="product-summary">
+            <img id="productCover" class="product-cover" src="" alt="商品主图">
+            <div class="product-info">
+              <h3 id="productTitle">-</h3>
+              <p class="product-price">价格: <span id="productPrice">-</span></p>
+              <p class="product-platform">来源: <span id="productPlatform">-</span></p>
+            </div>
+          </div>
+          
+          <div class="action-grid">
+            <div class="action-card">
+              <h4>媒体资产打包</h4>
+              <p class="desc">打包下载主图/变体/描述图</p>
+              <div class="btn-group">
+                <button id="btnDownloadZip" class="btn btn-primary">打包下载 (ZIP)</button>
+              </div>
+              <label class="checkbox-container">
+                <input type="checkbox" id="chkWebpToJpg" checked>
+                <span class="checkmark"></span>
+                自动将 WebP 转为 JPG 格式
+              </label>
+            </div>
+            
+            <div class="action-card">
+              <h4>快速复制文案</h4>
+              <p class="desc">一键抓取，去噪纯文本</p>
+              <div class="btn-group-row">
+                <button id="btnCopyTitle" class="btn btn-secondary btn-sm">复制标题</button>
+                <button id="btnCopyDesc" class="btn btn-secondary btn-sm">复制描述 (去HTML)</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="export-section">
+            <h4>导出跨境数据包</h4>
+            <div class="btn-group-row">
+              <button id="btnExportShopifyCsv" class="btn btn-accent">导出 Shopify CSV</button>
+              <button id="btnExportShoplineCsv" class="btn btn-accent">导出 Shopline CSV</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. 批量链接采集面板 -->
+      <section id="tab-batch" class="tab-panel">
+        <div class="panel-header">
+          <h3>批量单品采集</h3>
+          <span class="info-tip">通过换行/回车分隔链接</span>
+        </div>
+        <textarea id="txtBatchUrls" class="text-area-input" placeholder="请在这里粘贴商品链接，例如：&#10;https://item.1688.com/offer/xxxxxx.html&#10;https://www.amazon.com/dp/xxxxxx"></textarea>
+        
+        <div class="settings-row">
+          <div class="quota-info">
+            <span class="label">今日额度:</span>
+            <span id="lblDailyQuota">-</span>
+          </div>
+          <button id="btnSubmitBatch" class="btn btn-primary">开始批量采集</button>
+        </div>
+
+        <div id="batchProgressContainer" class="progress-container hidden">
+          <div class="progress-bar-wrapper">
+            <div id="batchProgressBar" class="progress-bar"></div>
+          </div>
+          <div class="progress-status">
+            <span id="lblBatchProgressStatus">准备中...</span>
+            <button id="btnCancelBatch" class="btn-micro btn-danger">中止</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Excel 批量导入面板 -->
+      <section id="tab-excel" class="tab-panel">
+        <div class="panel-header">
+          <h3>Excel 表格批量导入</h3>
+          <p class="desc">纯本地 SheetJS 解析，数据不走服务器</p>
+        </div>
+        <div class="file-upload-zone" id="excelUploadZone">
+          <svg class="upload-icon" viewBox="0 0 24 24">
+            <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+          </svg>
+          <p class="upload-tip">点击或将 Excel 文件拖拽到此处</p>
+          <span class="upload-sub">支持标准的跨境刊登模板 (.xlsx, .xls)</span>
+          <input type="file" id="fileExcelInput" class="file-input" accept=".xlsx, .xls" />
+        </div>
+        <div id="excelInfoPanel" class="excel-info hidden">
+          <p class="excel-meta">已解析表格: <strong id="lblExcelFileName">-</strong>，共检测到 <strong id="lblExcelUrlCount">0</strong> 条商品链接</p>
+          <p id="excelVipWarn" class="warning-banner hidden">⚠️ 免费版仅支持解析前 3 条链接，请升级以解锁无限导入</p>
+          <button id="btnStartExcelScrape" class="btn btn-primary w-100">开始导入并采集</button>
+        </div>
+
+        <div id="excelProgressContainer" class="progress-container hidden">
+          <div class="progress-bar-wrapper">
+            <div id="excelProgressBar" class="progress-bar"></div>
+          </div>
+          <div class="progress-status">
+            <span id="lblExcelProgressStatus">进度: 0/0</span>
+            <span id="lblExcelStatusText">准备中...</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. 类目翻页抓取面板 -->
+      <section id="tab-category" class="tab-panel">
+        <div class="panel-header">
+          <h3>目录/类目链接一键扒取</h3>
+          <span class="badge badge-vip">高级功能</span>
+        </div>
+        <p class="desc">在 collections/all 或亚马逊搜索列表页，自动嗅探整页商品链接并自动翻页抓取。</p>
+        
+        <div id="categorySniffInfo" class="sniff-box">
+          <p>当前页面检测到: <strong id="lblCategoryDetectedCount">0</strong> 个商品链接</p>
+          <div class="settings-row">
+            <label for="numPageCount">翻页限制:</label>
+            <input type="number" id="numPageCount" value="5" min="1" max="50" class="input-number"> 页
+          </div>
+          <button id="btnStartCategoryScrape" class="btn btn-accent w-100 disabled" disabled>开启自动翻页抓取</button>
+        </div>
+
+        <div id="categoryProgressContainer" class="progress-container hidden">
+          <div class="progress-bar-wrapper">
+            <div id="categoryProgressBar" class="progress-bar"></div>
+          </div>
+          <div class="progress-status">
+            <span id="lblCategoryProgressStatus">正在提取第 1 页...</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. 云端设置中控面板 -->
+      <section id="tab-settings" class="tab-panel">
+        <div class="auth-section card">
+          <h4>会员鉴权与绑定</h4>
+          <div class="input-group">
+            <label for="txtJwtToken">当前 JWT 设备激活码:</label>
+            <input type="password" id="txtJwtToken" class="text-input" placeholder="输入激活码或 JWT Token">
+          </div>
+          <div class="btn-group-row">
+            <button id="btnVerifyAuth" class="btn btn-primary">校验并绑定</button>
+            <button id="btnResetAuth" class="btn btn-secondary">注销登录</button>
+          </div>
+        </div>
+
+        <div class="translation-section card">
+          <h4>变体词汇翻译字典 (中文 -> 英文)</h4>
+          <p class="desc">1688 等中文站变体属性（如“红色/XL”）自动映射为独立站英文。</p>
+          <textarea id="txtDictConfig" class="text-area-input mini" placeholder="红色:Red&#10;蓝色:Blue&#10;黑色:Black&#10;白色:White&#10;大号:L&#10;加大号:XL"></textarea>
+          <button id="btnSaveDict" class="btn btn-secondary btn-sm">保存字典配置</button>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- 底部 Status Bar -->
+    <footer class="app-footer">
+      <span id="lblSystemMessage">服务运行正常</span>
+      <span class="author-credits">Antigravity Premium Extension</span>
+    </footer>
+  </div>
+
+  <!-- 引入打包和解析脚本 -->
+  <script src="lib/jszip.min.js"></script>
+  <script src="lib/xlsx.full.min.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
