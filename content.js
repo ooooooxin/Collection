@@ -242,13 +242,13 @@ async function parseDomData(platform) {
       }
     }
 
-    // 1. 提取轮播主图 (高容错设计)
+    // 1. 提取轮播主图 (高容错设计 + 过滤 SVG)
     const imgElements = Array.from(document.querySelectorAll('.detail-gallery img, .detail-gallery-img img, .prop-img img, .nav-slider-img img, img.detail-gallery-img'));
     let rawImgs = imgElements.map(img => {
       return img.getAttribute('src') || img.getAttribute('lazy-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-src');
     }).filter(Boolean);
     
-    let cleanImgs = [...new Set(rawImgs.map(get1688HighResUrl))].filter(Boolean);
+    let cleanImgs = [...new Set(rawImgs.map(get1688HighResUrl))].filter(url => url && !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
 
     // 降维兜底：如果常规 CSS 选择器抓取到的主图过少，直接扫描全页面 ibank 大图资源
     if (cleanImgs.length < 2) {
@@ -260,11 +260,11 @@ async function parseDomData(platform) {
       const ibankImgs = allPageImgs.filter(src => {
         const lowercaseSrc = src.toLowerCase();
         return (lowercaseSrc.includes('cbu01.alicdn.com/img/ibank/') || lowercaseSrc.includes('img.alicdn.com/')) &&
-               !lowercaseSrc.includes('logo') && !lowercaseSrc.includes('icon') && !lowercaseSrc.includes('loading') && !lowercaseSrc.includes('avatar');
+               !lowercaseSrc.includes('logo') && !lowercaseSrc.includes('icon') && !lowercaseSrc.includes('loading') && !lowercaseSrc.includes('avatar') &&
+               !lowercaseSrc.endsWith('.svg') && !lowercaseSrc.includes('/svg/');
       });
 
       const highResIbanks = [...new Set(ibankImgs.map(get1688HighResUrl))].filter(Boolean);
-      // 前 5 个不重复的 ibank 图片通常 99% 就是主图轮播图
       if (highResIbanks.length > 0) {
         cleanImgs = highResIbanks.slice(0, 5);
       }
@@ -272,11 +272,12 @@ async function parseDomData(platform) {
     
     data.images = cleanImgs;
 
-    // 2. 提取详情图 (通过 Background 代理 fetch 以规避 CSP 限制)
+    // 2. 提取详情图 (支持新的天猫 CDN 描述地址 + 过滤 SVG)
     try {
       const htmlText = document.documentElement.outerHTML;
-      const descUrlMatch = htmlText.match(/["'](https?:)?\/\/desc\.1688\.com\/fdesc\/[^"'\s]+["']/i) || 
-                           htmlText.match(/["'](https?:)?\/\/cbu01\.alicdn\.com\/desc\/[^"'\s]+["']/i);
+      // 兼容天猫/淘宝等新的 CDN 描述接口 URL (itemcdn.tmall.com/desc/...)
+      const descUrlMatch = htmlText.match(/["'](https?:)?\/\/[^"'\s]*?(desc\.1688\.com|cbu01\.alicdn\.com|itemcdn\.tmall\.com)\/desc\/[^"'\s]+?["']/i) ||
+                           htmlText.match(/["'](https?:)?\/\/[^"'\s]+?\/desc\/[^"'\s]+?["']/i);
       
       let descUrl = '';
       if (descUrlMatch) {
@@ -291,7 +292,6 @@ async function parseDomData(platform) {
 
       if (descUrl) {
         console.log('Fetching 1688 description via background proxy:', descUrl);
-        // 使用 Background 代理获取描述，解决前台跨域和 CSP 限制问题
         const response = await new Promise(resolve => {
           chrome.runtime.sendMessage({ action: 'proxyFetchText', url: descUrl }, resolve);
         });
@@ -299,7 +299,8 @@ async function parseDomData(platform) {
         if (response && response.success && response.text) {
           const descText = response.text;
           const ibankMatches = [...descText.matchAll(/(https?:)?\/\/cbu01\.alicdn\.com\/img\/ibank\/[^\s"'\\]+/gi)];
-          const detailImgs = ibankMatches.map(m => get1688HighResUrl(m[0].replace(/\\/g, '')));
+          // 过滤掉 SVG 图片
+          const detailImgs = ibankMatches.map(m => get1688HighResUrl(m[0].replace(/\\/g, ''))).filter(url => !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
           if (detailImgs.length > 0) {
             data.description = detailImgs.map(img => `<img src="${img}" />`).join('\n');
             if (data.images.length === 0) {
@@ -317,7 +318,7 @@ async function parseDomData(platform) {
             return img.getAttribute('src') || img.getAttribute('lazy-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-src');
           }).filter(Boolean);
           if (lazyImgs.length > 0) {
-            const cleanLazy = [...new Set(lazyImgs.map(get1688HighResUrl))];
+            const cleanLazy = [...new Set(lazyImgs.map(get1688HighResUrl))].filter(url => !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
             data.description = cleanLazy.map(img => `<img src="${img}" />`).join('\n');
           }
         }

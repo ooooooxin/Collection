@@ -431,12 +431,12 @@ async function parseHtmlData(html, url, platform) {
       const altImgs = [...html.matchAll(/(https?:)?\/\/cbu01\.alicdn\.com\/img\/ibank\/[^\s"']+\.jpg/gi)];
       rawImgs = [...new Set(altImgs.map(m => m[0]))];
     }
-    data.images = rawImgs.map(get1688HighResUrl);
+    data.images = rawImgs.map(get1688HighResUrl).filter(url => url && !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
 
-    // 异步提取详情图
+    // 异步提取详情图 (支持新的天猫 CDN 描述地址 + 过滤 SVG)
     try {
-      const descUrlMatch = html.match(/["'](https?:)?\/\/desc\.1688\.com\/fdesc\/[^"'\s]+["']/i) || 
-                           html.match(/["'](https?:)?\/\/cbu01\.alicdn\.com\/desc\/[^"'\s]+["']/i);
+      const descUrlMatch = html.match(/["'](https?:)?\/\/[^"'\s]*?(desc\.1688\.com|cbu01\.alicdn\.com|itemcdn\.tmall\.com)\/desc\/[^"'\s]+?["']/i) ||
+                           html.match(/["'](https?:)?\/\/[^"'\s]+?\/desc\/[^"'\s]+?["']/i);
       if (descUrlMatch) {
         let descUrl = descUrlMatch[0].replace(/["']/g, '');
         if (descUrl.startsWith('//')) descUrl = 'https:' + descUrl;
@@ -445,7 +445,7 @@ async function parseHtmlData(html, url, platform) {
         if (descRes.ok) {
           const descText = await descRes.text();
           const ibankMatches = [...descText.matchAll(/(https?:)?\/\/cbu01\.alicdn\.com\/img\/ibank\/[^\s"'\\]+/gi)];
-          const detailImgs = ibankMatches.map(m => get1688HighResUrl(m[0].replace(/\\/g, '')));
+          const detailImgs = ibankMatches.map(m => get1688HighResUrl(m[0].replace(/\\/g, ''))).filter(url => !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
           if (detailImgs.length > 0) {
             data.description = detailImgs.map(img => `<img src="${img}" />`).join('\n');
             if (data.images.length === 0) {
