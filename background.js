@@ -371,27 +371,53 @@ async function parseHtmlData(html, url, platform) {
   } else if (platform === 'aliexpress') {
     // AliExpress 详情页一般包含 window._detailData 或 window.runParams
     const runParamsMatch = html.match(/window\.runParams\s*=\s*({.+?});/);
+    let rawImgs = [];
     if (runParamsMatch) {
       try {
         const runParams = JSON.parse(runParamsMatch[1]);
         const widgetData = runParams?.data?.productInfoComponent || runParams?.data?.actionComponent;
         data.title = widgetData?.subject || '';
         data.price = runParams?.data?.priceComponent?.priceText || '0.00';
-        data.images = runParams?.data?.imageComponent?.imagePathList || [];
+        rawImgs = runParams?.data?.imageComponent?.imagePathList || [];
         data.vendor = runParams?.data?.sellerComponent?.shopName || '';
       } catch (e) {
         console.error('Failed to parse AliExpress runParams');
       }
     }
+    
+    if (!data.title) {
+      const titleMatch = html.match(/<h1[^>]*>\s*([^<]+)\s*<\/h1>/i) || html.match(/<h1[^>]*>([\s\S]+?)<\/h1>/i);
+      data.title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : 'AliExpress Product';
+    }
+
+    // 全局正则抓取 kf 静态大图
+    const kfMatches = [...html.matchAll(/(https?:)?\/\/ae01\.alicdn\.com\/kf\/[^\s"'\\]+?\.(jpg|png|webp|jpeg)/gi)];
+    const kfUrls = [...new Set(kfMatches.map(m => {
+      let clean = m[0].replace(/\\/g, '').replace(/_\d+x\d+.*$/, '').replace(/_Q\d+.*$/, '').replace(/_\.webp$/, '');
+      if (clean.startsWith('//')) clean = 'https:' + clean;
+      return clean;
+    }))].filter(url => !url.toLowerCase().endsWith('.svg'));
+
+    if (rawImgs.length === 0 && kfUrls.length > 0) {
+      data.images = kfUrls.slice(0, 5);
+    } else if (rawImgs.length > 0) {
+      data.images = rawImgs.map(url => {
+        let clean = url.replace(/_\d+x\d+.*$/, '').replace(/_Q\d+.*$/, '').replace(/_\.webp$/, '');
+        if (clean.startsWith('//')) clean = 'https:' + clean;
+        return clean;
+      }).filter(url => !url.toLowerCase().endsWith('.svg'));
+    }
+
+    // 详情图：其他 KF 图片作为详情图
+    const detailCandidates = kfUrls.filter(url => !data.images.includes(url));
+    if (detailCandidates.length > 0) {
+      data.description = detailCandidates.map(url => `<img src="${url}" />`).join('\n');
+    }
 
     const aliVideoMatch = html.match(/https?:\/\/video\.aliexpress-media\.com\/[^\s"'\\]+?\.mp4/i) ||
-                          html.match(/https?:\/\/.*aliexpress.*\.mp4/i);
-    if (aliVideoMatch) data.video_url = aliVideoMatch[0];
-    
-    // 备用匹配
-    if (!data.title) {
-      const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/);
-      data.title = titleMatch ? titleMatch[1].trim() : 'AliExpress Product';
+                          html.match(/https?:\/\/[^\s"'\\]+?\.mp4/i);
+    if (aliVideoMatch) {
+      data.video_url = aliVideoMatch[0].replace(/\\/g, '');
     }
   } else if (platform === '1688') {
     // 1688 数据匹配

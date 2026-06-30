@@ -187,20 +187,68 @@ async function parseDomData(platform) {
       const runData = window.runParams.data;
       data.title = runData.productInfoComponent?.subject || document.title;
       data.price = runData.priceComponent?.priceText || '0.00';
-      data.images = runData.imageComponent?.imagePathList || [];
+      data.images = (runData.imageComponent?.imagePathList || []).map(url => {
+        let clean = url.replace(/_\d+x\d+.*$/, '').replace(/_Q\d+.*$/, '').replace(/_\.webp$/, '');
+        if (clean.startsWith('//')) clean = 'https:' + clean;
+        return clean;
+      }).filter(url => !url.toLowerCase().endsWith('.svg'));
+      
       if (runData.sellerComponent) {
         data.vendor = runData.sellerComponent.shopName || '';
       }
     } else {
-      const titleEl = document.querySelector('.product-title') || document.querySelector('h1');
+      const titleEl = document.querySelector('.product-title') || document.querySelector('h1') || document.querySelector('[class*="title"]');
       if (titleEl) data.title = titleEl.textContent.trim();
-      const priceEl = document.querySelector('.product-price-value') || document.querySelector('.price');
+      const priceEl = document.querySelector('.product-price-value') || document.querySelector('.price') || document.querySelector('[class*="price"]');
       if (priceEl) data.price = priceEl.textContent.trim().replace(/[^0-9.]/g, '');
-      const imgs = Array.from(document.querySelectorAll('.images-view-item img, .image-view-magnifier-wrap img'));
-      data.images = imgs.map(img => img.src.replace(/_Q90\.jpg$/, ''));
+
+      // 提取主图，支持多种新版类名
+      const imgs = Array.from(document.querySelectorAll('.images-view-item img, .image-view-magnifier-wrap img, .slider--img img, [class*="slider"] img, [class*="gallery"] img, img.magnifier-image'));
+      let rawImgs = imgs.map(img => img.src || img.getAttribute('lazy-src') || img.getAttribute('data-src')).filter(Boolean);
       
-      const shopEl = document.querySelector('.shop-name, .store-name a');
+      // 高容错：如果未定位到足够的主图，扫描全页面托管在 ae01.alicdn.com/kf/ 的资源
+      if (rawImgs.length < 2) {
+        console.log('AliExpress CSS selectors matched fewer than 2 images, running full-page kf scanner...');
+        const allPageImgs = Array.from(document.querySelectorAll('img')).map(img => {
+          return img.src || img.getAttribute('lazy-src') || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
+        }).filter(Boolean);
+
+        const kfImgs = allPageImgs.filter(src => src.includes('ae01.alicdn.com/kf/') && !src.toLowerCase().endsWith('.svg'));
+        if (kfImgs.length > 0) {
+          rawImgs = kfImgs;
+        }
+      }
+
+      data.images = [...new Set(rawImgs.map(url => {
+        let clean = url.replace(/_\d+x\d+.*$/, '').replace(/_Q\d+.*$/, '').replace(/_\.webp$/, '');
+        if (clean.startsWith('//')) clean = 'https:' + clean;
+        return clean;
+      }))].filter(url => !url.toLowerCase().endsWith('.svg'));
+      
+      const shopEl = document.querySelector('.shop-name, .store-name a, [class*="shop-name"]');
       if (shopEl) data.vendor = shopEl.textContent.trim();
+    }
+
+    // 详情图抓取：全局提取除了主图外，页面偏下部的其它 KF 静态大图资源
+    try {
+      const allImgs = Array.from(document.querySelectorAll('img')).map(img => {
+        return img.src || img.getAttribute('lazy-src') || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
+      }).filter(Boolean);
+      const kfImgs = allImgs.filter(src => src.includes('ae01.alicdn.com/kf/') && !src.toLowerCase().endsWith('.svg'));
+      
+      // 提取非主图的 KF 大图作为详情图
+      const cleanKfs = [...new Set(kfImgs.map(url => {
+        let clean = url.replace(/_\d+x\d+.*$/, '').replace(/_Q\d+.*$/, '').replace(/_\.webp$/, '');
+        if (clean.startsWith('//')) clean = 'https:' + clean;
+        return clean;
+      }))];
+
+      const detailCandidates = cleanKfs.filter(url => !data.images.includes(url));
+      if (detailCandidates.length > 0) {
+        data.description = detailCandidates.map(url => `<img src="${url}" />`).join('\n');
+      }
+    } catch (e) {
+      console.warn('Failed to parse AliExpress detail images:', e);
     }
 
     const aliVideo = document.querySelector('.video-uploader video, .video-wrap video, video');
@@ -208,8 +256,12 @@ async function parseDomData(platform) {
       data.video_url = aliVideo.src;
     } else {
       const htmlText = document.documentElement.outerHTML;
-      const mp4Match = htmlText.match(/https?:\/\/video\.aliexpress-media\.com\/[^\s"'\\]+?\.mp4/i);
-      if (mp4Match) data.video_url = mp4Match[0];
+      const mp4Match = htmlText.match(/https?:\/\/video\.aliexpress-media\.com\/[^\s"'\\]+?\.mp4/i) || 
+                       htmlText.match(/https?:\/\/[^\s"'\\]+?\.mp4/i);
+      if (mp4Match) {
+        let cleanVideo = mp4Match[0].replace(/\\/g, '');
+        data.video_url = cleanVideo;
+      }
     }
   } 
   else if (platform === '1688') {
