@@ -323,6 +323,8 @@ async function parseHtmlData(html, url, platform) {
     url: url,
     platform: platform,
     price: '0.00',
+    vendor: '',
+    video_url: '',
     description: '',
     images: [],
     variants: []
@@ -336,6 +338,15 @@ async function parseHtmlData(html, url, platform) {
     // 匹配价格
     const priceMatch = html.match(/<span class="a-offscreen">([^<]+)<\/span>/i) || 
                        html.match(/<span id="priceblock_ourprice"[^>]*>([^<]+)<\/span>/i);
+    
+    // 匹配店铺名
+    const brandMatch = html.match(/id="bylineInfo"[^>]*>\s*([^<]+)\s*<\/a>/i) || 
+                       html.match(/brand\s*["']:\s*["']([^"']+)["']/i);
+    data.vendor = brandMatch ? brandMatch[1].trim().replace(/^Visit the\s+/i, '').replace(/\s+Store$/i, '') : '';
+
+    // 匹配主图视频
+    const amzVideoMatch = html.match(/https?:\/\/m\.media-amazon\.com\/images\/I\/[^\s"'\\]+?\.mp4/i);
+    if (amzVideoMatch) data.video_url = amzVideoMatch[0];
     data.price = priceMatch ? priceMatch[1].trim().replace(/[^0-9.]/g, '') : '0.00';
 
     // 匹配大图
@@ -367,10 +378,15 @@ async function parseHtmlData(html, url, platform) {
         data.title = widgetData?.subject || '';
         data.price = runParams?.data?.priceComponent?.priceText || '0.00';
         data.images = runParams?.data?.imageComponent?.imagePathList || [];
+        data.vendor = runParams?.data?.sellerComponent?.shopName || '';
       } catch (e) {
         console.error('Failed to parse AliExpress runParams');
       }
     }
+
+    const aliVideoMatch = html.match(/https?:\/\/video\.aliexpress-media\.com\/[^\s"'\\]+?\.mp4/i) ||
+                          html.match(/https?:\/\/.*aliexpress.*\.mp4/i);
+    if (aliVideoMatch) data.video_url = aliVideoMatch[0];
     
     // 备用匹配
     if (!data.title) {
@@ -388,6 +404,23 @@ async function parseHtmlData(html, url, platform) {
                        html.match(/<div class="price-text">([^<]+)<\/div>/i) ||
                        html.match(/class="offer-price">([^<]+)<\/i>/i);
     data.price = priceMatch ? priceMatch[1].trim().replace(/[^0-9.]/g, '') : '0.00';
+
+    // 匹配店铺名
+    const shopMatch = html.match(/class="company-name"[^>]*>\s*([^<]+)\s*<\/a>/i) ||
+                      html.match(/companyName\s*["']:\s*["']([^"']+)["']/i) ||
+                      html.match(/class="company-name-text"[^>]*>\s*([^<]+)\s*<\/div>/i);
+    data.vendor = shopMatch ? shopMatch[1].trim() : '';
+
+    // 匹配主图视频
+    const videoMatch = html.match(/cloud\.video\.taobao\.com\/play\/u\/\d+\/p\/\d+\/e\/\d+\/t\/\d+\/[^\s"'\\]+\.mp4/i) || 
+                       html.match(/cloud\.video\.taobao\.com\/play\/[^\s"'\\]+/i);
+    if (videoMatch) {
+      let cleanVideo = videoMatch[0].replace(/\\/g, '');
+      if (!cleanVideo.startsWith('http')) {
+        cleanVideo = 'https://' + cleanVideo;
+      }
+      data.video_url = cleanVideo;
+    }
 
     // 匹配相册大图并转换为超高清
     const imgMatches = [...html.matchAll(/class="detail-gallery-img"[^>]+src="([^"]+)"/gi)] || 

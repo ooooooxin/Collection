@@ -97,6 +97,8 @@ async function scrapeCurrentPage() {
           url: url,
           platform: 'shopify',
           price: p.variants?.[0]?.price || '0.00',
+          vendor: p.vendor || '',
+          video_url: (p.media || []).find(m => m.media_type === 'video')?.sources?.[0]?.url || (document.querySelector('video') ? document.querySelector('video').src : ''),
           description: p.body_html || '',
           images: (p.images || []).map(img => img.src),
           variants: (p.variants || []).map(v => ({
@@ -132,6 +134,8 @@ async function parseDomData(platform) {
     url: window.location.href,
     platform: platform,
     price: '0.00',
+    vendor: '',
+    video_url: '',
     description: '',
     images: [],
     variants: [],
@@ -144,6 +148,18 @@ async function parseDomData(platform) {
 
     const priceEl = document.querySelector('.a-price .a-offscreen') || document.querySelector('#priceblock_ourprice');
     if (priceEl) data.price = priceEl.textContent.trim().replace(/[^0-9.]/g, '');
+
+    const brandEl = document.querySelector('#bylineInfo, #sellerProfileTriggerId, #brand');
+    if (brandEl) data.vendor = brandEl.textContent.trim().replace(/^Visit the\s+/i, '').replace(/\s+Store$/i, '');
+
+    const amzVideo = document.querySelector('video.vjs-tech, #inline-video-main video, video');
+    if (amzVideo && amzVideo.src) {
+      data.video_url = amzVideo.src;
+    } else {
+      const htmlText = document.documentElement.outerHTML;
+      const mp4Match = htmlText.match(/https?:\/\/[^\s"'\\]+?\.mp4/i);
+      if (mp4Match) data.video_url = mp4Match[0];
+    }
 
     const imgEl = document.querySelector('#landingImage') || document.querySelector('#imgBlkFront');
     if (imgEl) {
@@ -172,6 +188,9 @@ async function parseDomData(platform) {
       data.title = runData.productInfoComponent?.subject || document.title;
       data.price = runData.priceComponent?.priceText || '0.00';
       data.images = runData.imageComponent?.imagePathList || [];
+      if (runData.sellerComponent) {
+        data.vendor = runData.sellerComponent.shopName || '';
+      }
     } else {
       const titleEl = document.querySelector('.product-title') || document.querySelector('h1');
       if (titleEl) data.title = titleEl.textContent.trim();
@@ -179,6 +198,18 @@ async function parseDomData(platform) {
       if (priceEl) data.price = priceEl.textContent.trim().replace(/[^0-9.]/g, '');
       const imgs = Array.from(document.querySelectorAll('.images-view-item img, .image-view-magnifier-wrap img'));
       data.images = imgs.map(img => img.src.replace(/_Q90\.jpg$/, ''));
+      
+      const shopEl = document.querySelector('.shop-name, .store-name a');
+      if (shopEl) data.vendor = shopEl.textContent.trim();
+    }
+
+    const aliVideo = document.querySelector('.video-uploader video, .video-wrap video, video');
+    if (aliVideo && aliVideo.src) {
+      data.video_url = aliVideo.src;
+    } else {
+      const htmlText = document.documentElement.outerHTML;
+      const mp4Match = htmlText.match(/https?:\/\/video\.aliexpress-media\.com\/[^\s"'\\]+?\.mp4/i);
+      if (mp4Match) data.video_url = mp4Match[0];
     }
   } 
   else if (platform === '1688') {
@@ -189,6 +220,27 @@ async function parseDomData(platform) {
     // 价格
     const priceEl = document.querySelector('.price-num') || document.querySelector('.price-text') || document.querySelector('.offer-price');
     if (priceEl) data.price = priceEl.textContent.trim().replace(/[^0-9.]/g, '');
+
+    // 店铺名
+    const shopEl = document.querySelector('.company-name, .company-name-text, a.company-name, .member-info-name, .company-info .company-name');
+    if (shopEl) data.vendor = shopEl.textContent.trim();
+
+    // 视频源
+    const videoEl = document.querySelector('.video-container video, .video-player video, video');
+    if (videoEl && videoEl.src && videoEl.src.includes('video.taobao.com')) {
+      data.video_url = videoEl.src;
+    } else {
+      const htmlText = document.documentElement.outerHTML;
+      const videoMatch = htmlText.match(/cloud\.video\.taobao\.com\/play\/u\/\d+\/p\/\d+\/e\/\d+\/t\/\d+\/[^\s"'\\]+\.mp4/i) || 
+                         htmlText.match(/cloud\.video\.taobao\.com\/play\/[^\s"'\\]+/i);
+      if (videoMatch) {
+        let cleanVideo = videoMatch[0].replace(/\\/g, '');
+        if (!cleanVideo.startsWith('http')) {
+          cleanVideo = 'https://' + cleanVideo;
+        }
+        data.video_url = cleanVideo;
+      }
+    }
 
     // 1. 提取轮播主图 (高容错设计)
     const imgElements = Array.from(document.querySelectorAll('.detail-gallery img, .detail-gallery-img img, .prop-img img, .nav-slider-img img, img.detail-gallery-img'));

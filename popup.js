@@ -102,6 +102,8 @@ if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMess
                 url: 'https://demo.shopify.com/products/mock-fancy-sneaker',
                 platform: 'shopify',
                 price: '199.00',
+                vendor: 'Antigravity 官方旗舰店',
+                video_url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
                 description: '<p>这是一款由 Antigravity 生成的高端模拟跑鞋，具有透气和酷炫暗黑毛玻璃外观。</p>',
                 images: ['https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400'],
                 variants: [
@@ -384,6 +386,7 @@ function showScrapedProduct(product) {
   
   document.getElementById('productTitle').innerText = product.title;
   document.getElementById('productPrice').innerText = product.price;
+  document.getElementById('productVendor').innerText = product.vendor || '未知店铺';
   document.getElementById('productPlatform').innerText = product.platform.toUpperCase();
   
   // 封面图
@@ -449,6 +452,29 @@ async function downloadMediaZip() {
     });
 
     await Promise.all(downloadPromises);
+
+    // 3. 下载并打包主图视频
+    if (currentScrapedProduct.video_url) {
+      showToast('正在下载并打包主图视频...', 'info');
+      try {
+        const videoResponse = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: 'proxyFetchImage', url: currentScrapedProduct.video_url }, resolve);
+        });
+
+        if (videoResponse && videoResponse.success && videoResponse.base64) {
+          const videoBase64 = videoResponse.base64;
+          const binaryVideo = atob(videoBase64.split(',')[1]);
+          const videoBuffer = new ArrayBuffer(binaryVideo.length);
+          const iaVideo = new Uint8Array(videoBuffer);
+          for (let i = 0; i < binaryVideo.length; i++) {
+            iaVideo[i] = binaryVideo.charCodeAt(i);
+          }
+          zip.file(`product_video.mp4`, videoBuffer);
+        }
+      } catch (err) {
+        console.warn('Failed to pack video into ZIP:', err);
+      }
+    }
 
     // 生成 ZIP
     const content = await zip.generateAsync({ type: "blob" });
