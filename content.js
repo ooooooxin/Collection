@@ -325,14 +325,29 @@ async function parseDomData(platform) {
 
     // 详情图抓取：优先定位详情容器（支持穿透 Shadow DOM），物理隔开主图与详情图，适配懒加载
     try {
-      const hostEl = document.querySelector('div[id="product-description"][class*="description"], div[class*="description--product-description"], div[data-pl="product-description"], #product-description');
+      const hostEl = document.querySelector('div[id="product-description"][class*="description"], div[class*="description--product-description"], div[data-pl="product-description"], #product-description, #nav-description, .description--wrap');
       let detailImgs = [];
       let imgElements = [];
 
-      if (hostEl && hostEl.shadowRoot) {
+      let shadowRoot = null;
+      if (hostEl) {
+        if (hostEl.shadowRoot) {
+          shadowRoot = hostEl.shadowRoot;
+        } else {
+          // 深度遍历所有子孙节点寻找隐藏的 shadowRoot 挂载点
+          const allChildren = hostEl.getElementsByTagName('*');
+          for (let el of allChildren) {
+            if (el.shadowRoot) {
+              shadowRoot = el.shadowRoot;
+              break;
+            }
+          }
+        }
+      }
+
+      if (shadowRoot) {
         console.log('AliExpress Shadow Root detected in description, penetrating shadow DOM...');
-        const shadow = hostEl.shadowRoot;
-        imgElements = Array.from(shadow.querySelectorAll('img'));
+        imgElements = Array.from(shadowRoot.querySelectorAll('img'));
       } else {
         const descContainer = document.querySelector('.product-description, .detail-desc, .origin-part, .description-content, #product-description, #detail-desc, .desc-lazyload-container');
         if (descContainer) {
