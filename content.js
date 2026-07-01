@@ -160,8 +160,18 @@ async function parseDomData(platform) {
     const shopEl = document.querySelector('[class*="seller-name"], [class*="seller"] a, a[href*="/seller/"]');
     if (shopEl) data.vendor = shopEl.textContent.trim();
 
-    // 1. 主图提取
-    const mainGalleryImgs = Array.from(document.querySelectorAll('[data-widget="webGallery"] img, [class*="gallery"] img, [class*="carousel"] img, img[src*="ozonru.me/s3/multimedia-"], img[src*="ozon.ru/s3/multimedia-"]'));
+    // 1. 主图提取 (优先定位 webGallery 容器并兼容全域 ozon CDN)
+    const galleryContainer = document.querySelector('[data-widget="webGallery"], [class*="gallery"], [class*="carousel"]');
+    let mainGalleryImgs = [];
+    if (galleryContainer) {
+      mainGalleryImgs = Array.from(galleryContainer.querySelectorAll('img'));
+    } else {
+      mainGalleryImgs = Array.from(document.querySelectorAll('img')).filter(img => {
+        const src = img.src || img.getAttribute('data-src') || '';
+        return src.includes('/s3/multimedia-') || src.includes('ozon');
+      });
+    }
+
     let rawImgs = mainGalleryImgs.map(img => {
       return img.getAttribute('data-lazyload') || 
              img.getAttribute('data-original') || 
@@ -171,7 +181,7 @@ async function parseDomData(platform) {
              img.src;
     }).filter(Boolean);
 
-    data.images = [...new Set(rawImgs.map(getOzonHighResUrl))].filter(url => !url.toLowerCase().endsWith('.svg') && (url.includes('ozonru.me') || url.includes('ozon.ru')));
+    data.images = [...new Set(rawImgs.map(getOzonHighResUrl))].filter(url => !url.toLowerCase().endsWith('.svg') && url.includes('ozon'));
 
     // 2. 详情图提取
     try {

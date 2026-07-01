@@ -521,14 +521,14 @@ async function parseHtmlData(html, url, platform) {
                       html.match(/seller\s*["']:\s*["']([^"']+)["']/i);
     data.vendor = shopMatch ? shopMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
-    // 匹配大图
-    const imgMatches = [...html.matchAll(/(https?:)?\/\/ir-\d+\.ozonru\.me\/s3\/multimedia-[^\s"'\\]+?\.(jpg|png|webp|jpeg)/gi)] ||
+    // 匹配大图 (兼容全域 ozon CDN)
+    const imgMatches = [...html.matchAll(/(https?:)?\/\/[^\s"'\\]*?ozon[^\s"'\\]*?\/s3\/multimedia-[^\s"'\\]+?\.(jpg|png|webp|jpeg)/gi)] ||
                        [...html.matchAll(/(https?:)?\/\/[^\s"'\\]+?ozon\.ru\/[^\s"'\\]+?\.(jpg|png|webp|jpeg)/gi)];
     const ozonUrls = [...new Set(imgMatches.map(m => {
       let clean = m[0].replace(/\\/g, '');
       if (clean.startsWith('//')) clean = 'https:' + clean;
       return getOzonHighResUrl(clean);
-    }))].filter(url => !url.toLowerCase().endsWith('.svg'));
+    }))].filter(url => !url.toLowerCase().endsWith('.svg') && url.includes('ozon'));
 
     if (ozonUrls.length > 0) {
       data.images = ozonUrls.slice(0, 5);
