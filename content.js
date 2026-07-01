@@ -457,129 +457,124 @@ async function parseDomData(platform) {
     if (cleanImgs.length < 2) {
       console.log('1688 CSS selectors matched fewer than 2 images, running full-page ibank scanner...');
       const allPageImgs = Array.from(document.querySelectorAll('img')).map(img => {
-        return img.getAttribute('src') || img.getAttribute('lazy-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-src');
-      }).filter(Boolean);
-
-      const ibankImgs = allPageImgs.filter(src => {
-        const lowercaseSrc = src.toLowerCase();
-        return (lowercaseSrc.includes('cbu01.alicdn.com/img/ibank/') || lowercaseSrc.includes('img.alicdn.com/')) &&
-               !lowercaseSrc.includes('logo') && !lowercaseSrc.includes('icon') && !lowercaseSrc.includes('loading') && !lowercaseSrc.includes('avatar') &&
-               !lowercaseSrc.endsWith('.svg') && !lowercaseSrc.includes('/svg/');
-      });
-
-      const highResIbanks = [...new Set(ibankImgs.map(get1688HighResUrl))].filter(Boolean);
-      if (highResIbanks.length > 0) {
-        cleanImgs = highResIbanks.slice(0, 5);
-      }
-    }
-    
-    data.images = cleanImgs;
-
-    // 2. 提取详情图 (支持新的天猫 CDN 描述地址 + 过滤 SVG)
+        return img.getAttrib    // 2. 提取详情图 (优先使用已渲染的本地 DOM / Shadow DOM，其次通过后台接口兜底)
     try {
-      const htmlText = document.documentElement.outerHTML;
-      // 兼容天猫/淘宝等新的 CDN 描述接口 URL (itemcdn.tmall.com/desc/...)
-      const descUrlMatch = htmlText.match(/["'](https?:)?\/\/[^"'\s]*?(desc\.1688\.com|cbu01\.alicdn\.com|itemcdn\.tmall\.com)\/desc\/[^"'\s]+?["']/i) ||
-                           htmlText.match(/["'](https?:)?\/\/[^"'\s]+?\/desc\/[^"'\s]+?["']/i);
-      
-      let descUrl = '';
-      if (descUrlMatch) {
-        descUrl = descUrlMatch[0].replace(/["']/g, '');
-        if (descUrl.startsWith('//')) descUrl = 'https:' + descUrl;
-      } else {
-        const container = document.querySelector('#desc-lazyload-container');
-        if (container) {
-          descUrl = container.getAttribute('data-tianyan-url') || container.getAttribute('data-tianyan-param');
-        }
-      }
+      let detailImgs = [];
 
-      if (descUrl) {
-        console.log('Fetching 1688 description via background proxy:', descUrl);
-        const response = await new Promise(resolve => {
-          chrome.runtime.sendMessage({ action: 'proxyFetchText', url: descUrl }, resolve);
-        });
+      // 流程 A: 本地 DOM 结构解析 (包含 v-detail-k 深层 Shadow DOM 穿透提取与推荐图过滤)
+      const descContainer = document.querySelector('#desc-lazyload-container, .collapse-body, .html-description, v-detail-k, #detail');
+      if (descContainer) {
+        let shadowRoot = null;
+        let imgElements = [];
 
-        if (response && response.success && response.text) {
-          const descText = response.text;
-          // 全面升级：正则提取 HTML 中所有的图片 src 属性，不再限死 ibank 域名以兼容天猫/淘宝 CDN 域名
-          const detailImgs = [];
-          const imgRegex = /(?:src|data-lazyload|data-src)\s*=\s*\\?["']([^"'\s]+?)\\?["']/gi;
-          let match;
-          while ((match = imgRegex.exec(descText)) !== null) {
-            let imgUrl = match[1].replace(/\\/g, '');
-            if (imgUrl.startsWith('//')) {
-              imgUrl = 'https:' + imgUrl;
-            }
-            const lowerUrl = imgUrl.toLowerCase();
-            // 只保留托管在阿里/天猫/淘宝 CDN 上的主图，且排查所有 gif 占位图和 svg
-            if (
-              lowerUrl.includes('alicdn.com') && 
-              !lowerUrl.endsWith('.svg') && 
-              !lowerUrl.includes('/svg/') &&
-              !lowerUrl.endsWith('.gif') &&
-              !lowerUrl.includes('space.gif') &&
-              !lowerUrl.includes('shim.gif')
-            ) {
-              detailImgs.push(get1688HighResUrl(imgUrl));
-            }
-          }
-
-          if (detailImgs.length > 0) {
-            data.description = detailImgs.map(img => `<img src="${img}" />`).join('\n');
-            if (data.images.length === 0) {
-              data.images = detailImgs.slice(0, 5);
+        if (descContainer.shadowRoot) {
+          shadowRoot = descContainer.shadowRoot;
+        } else {
+          // 深度遍历所有子孙节点寻找隐藏的 shadowRoot 挂载点
+          const allChildren = descContainer.getElementsByTagName('*');
+          for (let el of allChildren) {
+            if (el.shadowRoot) {
+              shadowRoot = el.shadowRoot;
+              break;
             }
           }
         }
+
+        if (shadowRoot) {
+          console.log('1688 Shadow Root detected in description, penetrating shadow DOM...');
+          const allImgs = Array.from(shadowRoot.querySelectorAll('img'));
+          // 过滤掉任何处于推荐模块 (如 offer-list-wrapper) 内的图片，仅保留商品真实的详情图
+          imgElements = allImgs.filter(img => {
+            let parent = img.parentElement;
+            while (parent && parent !== shadowRoot) {
+              const className = (parent.className || '').toString();
+              const idName = (parent.id || '').toString();
+              if (
+                className.includes('offer-list') || 
+                className.includes('recommend') ||
+                idName.includes('offer-list') || 
+                idName.includes('recommend')
+              ) {
+                return false;
+              }
+              parent = parent.parentElement;
+            }
+            return true;
+          });
+        } else {
+          imgElements = Array.from(descContainer.querySelectorAll('img'));
+        }
+
+        if (imgElements.length > 0) {
+          const lazyImgs = imgElements.map(img => {
+            return img.getAttribute('src') || 
+                   img.getAttribute('lazy-src') || 
+                   img.getAttribute('data-lazy-src') || 
+                   img.getAttribute('data-src') ||
+                   img.getAttribute('data-lazyload') ||
+                   img.getAttribute('data-original');
+          }).filter(Boolean);
+          
+          if (lazyImgs.length > 0) {
+            detailImgs = [...new Set(lazyImgs.map(get1688HighResUrl))].filter(url => !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
+          }
+        }
       }
 
-      // 兜底 DOM 结构解析 (全面支持 1688 新版 v-detail-k 深层 Shadow DOM 穿透提取)
-      if (!data.description) {
-        const descContainer = document.querySelector('#desc-lazyload-container, .collapse-body, .html-description, v-detail-k, #detail');
-        if (descContainer) {
-          let shadowRoot = null;
-          let imgElements = [];
+      // 流程 B: 只有当本地 DOM 没有解析到任何详情图时，才调用远程接口解析作为降维兜底
+      if (detailImgs.length === 0) {
+        console.log('1688 local DOM got 0 detail images, falling back to remote desc url...');
+        const htmlText = document.documentElement.outerHTML;
+        const descUrlMatch = htmlText.match(/["'](https?:)?\/\/[^"'\s]*?(desc\.1688\.com|cbu01\.alicdn\.com|itemcdn\.tmall\.com)\/desc\/[^"'\s]+?["']/i) ||
+                             htmlText.match(/["'](https?:)?\/\/[^"'\s]+?\/desc\/[^"'\s]+?["']/i);
+        
+        let descUrl = '';
+        if (descUrlMatch) {
+          descUrl = descUrlMatch[0].replace(/["']/g, '');
+          if (descUrl.startsWith('//')) descUrl = 'https:' + descUrl;
+        } else {
+          const container = document.querySelector('#desc-lazyload-container');
+          if (container) {
+            descUrl = container.getAttribute('data-tianyan-url') || container.getAttribute('data-tianyan-param');
+          }
+        }
 
-          if (descContainer.shadowRoot) {
-            shadowRoot = descContainer.shadowRoot;
-          } else {
-            // 深度遍历所有子孙节点寻找隐藏的 shadowRoot 挂载点
-            const allChildren = descContainer.getElementsByTagName('*');
-            for (let el of allChildren) {
-              if (el.shadowRoot) {
-                shadowRoot = el.shadowRoot;
-                break;
+        if (descUrl) {
+          console.log('Fetching 1688 description via background proxy:', descUrl);
+          const response = await new Promise(resolve => {
+            chrome.runtime.sendMessage({ action: 'proxyFetchText', url: descUrl }, resolve);
+          });
+
+          if (response && response.success && response.text) {
+            const descText = response.text;
+            const imgRegex = /(?:src|data-lazyload|data-src)\s*=\s*\\?["']([^"'\s]+?)\\?["']/gi;
+            let match;
+            while ((match = imgRegex.exec(descText)) !== null) {
+              let imgUrl = match[1].replace(/\\/g, '');
+              if (imgUrl.startsWith('//')) {
+                imgUrl = 'https:' + imgUrl;
+              }
+              const lowerUrl = imgUrl.toLowerCase();
+              if (
+                lowerUrl.includes('alicdn.com') && 
+                !lowerUrl.endsWith('.svg') && 
+                !lowerUrl.includes('/svg/') &&
+                !lowerUrl.endsWith('.gif') &&
+                !lowerUrl.includes('space.gif') &&
+                !lowerUrl.includes('shim.gif')
+              ) {
+                detailImgs.push(get1688HighResUrl(imgUrl));
               }
             }
           }
+        }
+      }
 
-          if (shadowRoot) {
-            console.log('1688 Shadow Root detected in description, penetrating shadow DOM...');
-            imgElements = Array.from(shadowRoot.querySelectorAll('img'));
-          } else {
-            imgElements = Array.from(descContainer.querySelectorAll('img'));
-          }
-
-          if (imgElements.length > 0) {
-            const lazyImgs = imgElements.map(img => {
-              return img.getAttribute('src') || 
-                     img.getAttribute('lazy-src') || 
-                     img.getAttribute('data-lazy-src') || 
-                     img.getAttribute('data-src') ||
-                     img.getAttribute('data-lazyload') ||
-                     img.getAttribute('data-original');
-            }).filter(Boolean);
-            
-            if (lazyImgs.length > 0) {
-              const cleanLazy = [...new Set(lazyImgs.map(get1688HighResUrl))].filter(url => !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
-              data.description = cleanLazy.map(img => `<img src="${img}" />`).join('\n');
-              
-              // 容错：如果主图抓取为空，提取详情图前 5 张充当主图
-              if (data.images.length === 0) {
-                data.images = cleanLazy.slice(0, 5);
-              }
-            }
-          }
+      // 最终赋值与容错
+      if (detailImgs.length > 0) {
+        data.description = detailImgs.map(img => `<img src="${img}" />`).join('\n');
+        if (data.images.length === 0) {
+          data.images = detailImgs.slice(0, 5);
         }
       }
     } catch (e) {
