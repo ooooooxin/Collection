@@ -419,6 +419,7 @@ function showScrapedProduct(product) {
 }
 
 /* ==================== 4. 媒体资产 ZIP 打包下载 ==================== */
+/* ==================== 4. 媒体资产 ZIP 打包下载 ==================== */
 async function downloadMediaZip() {
   if (!currentScrapedProduct) return;
 
@@ -430,6 +431,7 @@ async function downloadMediaZip() {
   try {
     const zip = new JSZip();
     const shouldConvert = document.getElementById('chkWebpToJpg').checked;
+    const shouldWash = document.getElementById('chkImageWash').checked;
     
     // 创建分门别类的图片文件夹
     const mainFolder = zip.folder("main_images");
@@ -464,8 +466,8 @@ async function downloadMediaZip() {
         
         // 兼容处理 WebP 和 AVIF
         const isNonJpg = ['webp', 'avif'].includes(ext.toLowerCase()) || fileData.startsWith('data:image/webp') || fileData.startsWith('data:image/avif');
-        if (shouldConvert && isNonJpg) {
-          fileData = await convertImageToJpg(fileData);
+        if (shouldWash || (shouldConvert && isNonJpg)) {
+          fileData = await convertImageToJpg(fileData, shouldWash);
           ext = 'jpg';
         }
 
@@ -476,10 +478,15 @@ async function downloadMediaZip() {
           return;
         }
 
-        const arrayBuffer = new ArrayBuffer(binaryData.length);
+        let arrayBuffer = new ArrayBuffer(binaryData.length);
         const ia = new Uint8Array(arrayBuffer);
         for (let i = 0; i < binaryData.length; i++) {
           ia[i] = binaryData.charCodeAt(i);
+        }
+
+        // 如果启用极致洗图，追加冗余尾字节改变文件的 MD5 哈希特征
+        if (shouldWash) {
+          arrayBuffer = washBinaryMd5(arrayBuffer);
         }
 
         mainFolder.file(`main_img_${idx + 1}.${ext}`, arrayBuffer);
@@ -503,8 +510,8 @@ async function downloadMediaZip() {
         let ext = getFileExtension(url) || 'jpg';
         
         const isNonJpg = ['webp', 'avif'].includes(ext.toLowerCase()) || fileData.startsWith('data:image/webp') || fileData.startsWith('data:image/avif');
-        if (shouldConvert && isNonJpg) {
-          fileData = await convertImageToJpg(fileData);
+        if (shouldWash || (shouldConvert && isNonJpg)) {
+          fileData = await convertImageToJpg(fileData, shouldWash);
           ext = 'jpg';
         }
 
@@ -514,10 +521,14 @@ async function downloadMediaZip() {
           return;
         }
 
-        const arrayBuffer = new ArrayBuffer(binaryData.length);
+        let arrayBuffer = new ArrayBuffer(binaryData.length);
         const ia = new Uint8Array(arrayBuffer);
         for (let i = 0; i < binaryData.length; i++) {
           ia[i] = binaryData.charCodeAt(i);
+        }
+
+        if (shouldWash) {
+          arrayBuffer = washBinaryMd5(arrayBuffer);
         }
 
         descFolder.file(`desc_img_${idx + 1}.${ext}`, arrayBuffer);
@@ -572,22 +583,52 @@ async function downloadMediaZip() {
   }
 }
 
-// 纯前端图片格式转换（WebP、AVIF 等转为 JPG）
-async function convertImageToJpg(base64Data) {
+// 纯前端图片格式转换与洗图处理（WebP、AVIF、JPG 等重绘微调，彻底改变像素视觉哈希）
+async function convertImageToJpg(base64Data, shouldWash = false) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      // 洗图模式：宽度高度各缩小裁剪 1px（彻底摧毁相似图像长宽比查重）
+      const border = shouldWash ? 1 : 0;
+      canvas.width = img.width - (border * 2);
+      canvas.height = img.height - (border * 2);
+      
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
+      if (shouldWash) {
+        // 微调对比度和亮度 (100.2% 物理漂移，人眼无感，像素感知哈希完全重刷)
+        ctx.filter = 'brightness(100.2%) contrast(100.3%)';
+        ctx.drawImage(img, border, border, img.width - (border * 2), img.height - (border * 2), 0, 0, canvas.width, canvas.height);
+        
+        // 隐形防关联盲水印：在右下角追加极低透明度 (0.005) 的随机彩噪像素点
+        ctx.fillStyle = `rgba(${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},${Math.floor(Math.random()*256)},0.005)`;
+        ctx.fillRect(canvas.width - 5, canvas.height - 5, 5, 5);
+      } else {
+        ctx.drawImage(img, 0, 0);
+      }
+      
       const jpgBase64 = canvas.toDataURL('image/jpeg', 0.9);
       resolve(jpgBase64);
     };
     img.onerror = (e) => reject(new Error('图片解码失败'));
     img.src = base64Data;
   });
+}
+
+// 二进制级洗图：在文件 EOF 追加 8 字节随机尾数据，彻底刷新物理 MD5
+function washBinaryMd5(arrayBuffer) {
+  const randomBytesCount = 8;
+  const newBuffer = new ArrayBuffer(arrayBuffer.byteLength + randomBytesCount);
+  const oldView = new Uint8Array(arrayBuffer);
+  const newView = new Uint8Array(newBuffer);
+  
+  newView.set(oldView);
+  
+  const now = Date.now();
+  for (let i = 0; i < randomBytesCount; i++) {
+    newView[arrayBuffer.byteLength + i] = (now >> (i * 8)) & 0xff;
+  }
+  return newBuffer;
 }
 
 function getFileExtension(url) {
@@ -614,12 +655,43 @@ function copyDescription() {
 }
 
 /* ==================== 6. CSV 格式包生成 ==================== */
-function translateOption(val) {
-  if (!val) return '';
-  // 匹配多语言映射，例如“红色/XL”
-  const parts = val.split('/').map(p => p.trim());
-  const translatedParts = parts.map(p => translationDict[p] || p);
-  return translatedParts.join(' / ');
+/* ==================== 6. CSV 格式包生成 ==================== */
+const builtinTranslateDict = {
+  "颜色": "Color", "尺寸": "Size", "规格": "Specification", "尺码": "Size", "版本": "Version", "款式": "Style",
+  "红色": "Red", "蓝色": "Blue", "黑色": "Black", "白色": "White", "黄色": "Yellow", 
+  "绿色": "Green", "灰色": "Grey", "粉色": "Pink", "紫色": "Purple", "橙色": "Orange", 
+  "酒红色": "Burgundy", "卡其色": "Khaki", "军绿色": "Army Green", "深蓝色": "Navy Blue", 
+  "棕色": "Brown", "咖啡色": "Coffee", "均码": "One Size", "单一规格": "One Size",
+  "大号": "L", "中号": "M", "小号": "S", "超大号": "XL", "加大号": "XL", "双加大": "XXL",
+  "三加大": "XXXL", "特大号": "XXL", "男": "Men", "女": "Women"
+};
+
+function translateOption(text) {
+  if (!text) return '';
+  const trimmed = text.trim();
+  if (translationDict && translationDict[trimmed]) {
+    return translationDict[trimmed];
+  }
+  if (builtinTranslateDict[trimmed]) {
+    return builtinTranslateDict[trimmed];
+  }
+  
+  // 剥离末尾的“色”字或“码”字进行翻译
+  if (trimmed.endsWith('色') && builtinTranslateDict[trimmed.slice(0, -1)]) {
+    return builtinTranslateDict[trimmed.slice(0, -1)];
+  }
+  if (trimmed.endsWith('码') && builtinTranslateDict[trimmed.slice(0, -1)]) {
+    return builtinTranslateDict[trimmed.slice(0, -1)];
+  }
+
+  // 复合词处理
+  if (trimmed.includes('/')) {
+    return trimmed.split('/').map(t => translateOption(t)).join(' / ');
+  }
+  if (trimmed.includes(':')) {
+    return trimmed.split(':').map(t => translateOption(t)).join(': ');
+  }
+  return trimmed;
 }
 
 function exportCsv(type = 'shopify') {
@@ -629,15 +701,21 @@ function exportCsv(type = 'shopify') {
     'Handle', 'Title', 'Body (HTML)', 'Vendor', 'Type', 'Tags', 'Published',
     'Option1 Name', 'Option1 Value', 'Option2 Name', 'Option2 Value', 'Option3 Name', 'Option3 Value',
     'Variant SKU', 'Variant Price', 'Variant Compare At Price', 'Variant Inventory Qty',
-    'Image Src', 'Image Position'
+    'Image Src', 'Image Position', 'Variant Image'
   ];
 
-  const handle = currentScrapedProduct.title.toLowerCase().substring(0, 30).replace(/[^a-z0-9]/g, '-');
+  const handle = currentScrapedProduct.title.toLowerCase().substring(0, 40).replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || `product-${Date.now()}`;
   const rows = [];
 
-  // 获取变体
+  // 获取变体与主图
   const variants = currentScrapedProduct.variants || [];
   const images = currentScrapedProduct.images || [];
+
+  // 解析并翻译选项名称
+  const options = currentScrapedProduct.options || [];
+  const opt1Name = options[0] ? translateOption(options[0].name) : 'Color';
+  const opt2Name = options[1] ? translateOption(options[1].name) : 'Size';
+  const opt3Name = options[2] ? translateOption(options[2].name) : '';
 
   // 构建多行变体及图片列表
   const maxLines = Math.max(variants.length, images.length, 1);
@@ -651,26 +729,39 @@ function exportCsv(type = 'shopify') {
     const opt2Val = v.option2 ? translateOption(v.option2) : '';
     const opt3Val = v.option3 ? translateOption(v.option3) : '';
 
+    // 本地主图文件名映射，用于 Shopify Files 直接上传无缝匹配
+    const localImgName = imgUrl ? `main_img_${i + 1}.jpg` : '';
+
+    // 查找该变体对应的关联大图并映射出本地图片名称
+    let variantImgLocalName = '';
+    if (v.image_url) {
+      const imgIndex = images.indexOf(v.image_url);
+      if (imgIndex !== -1) {
+        variantImgLocalName = `main_img_${imgIndex + 1}.jpg`;
+      }
+    }
+
     const row = [
       handle,                                                   // Handle
       i === 0 ? escapeCsvField(currentScrapedProduct.title) : '',// Title (首行输出)
       i === 0 ? escapeCsvField(currentScrapedProduct.description) : '', // Body HTML (首行输出)
-      i === 0 ? escapeCsvField(type === 'shopify' ? 'Shopify' : 'Shopline') : '', // Vendor
+      i === 0 ? escapeCsvField(currentScrapedProduct.vendor || 'Collection') : '', // Vendor
       i === 0 ? 'General' : '',                                 // Type
-      '',                                                       // Tags
+      '1688_Import',                                            // Tags
       'TRUE',                                                   // Published
-      i === 0 ? 'Size/Color' : '',                              // Option1 Name (首行)
+      i === 0 ? opt1Name : '',                                  // Option1 Name
       opt1Val,                                                  // Option1 Value
-      '',                                                       // Option2 Name
+      i === 0 && opt2Name ? opt2Name : '',                      // Option2 Name
       opt2Val,                                                  // Option2 Value
-      '',                                                       // Option3 Name
+      i === 0 && opt3Name ? opt3Name : '',                      // Option3 Name
       opt3Val,                                                  // Option3 Value
-      v.sku || '',                                              // Variant SKU
-      v.price || currentScrapedProduct.price,                   // Variant Price
+      v.sku || `${handle}-sku-${i}`,                            // Variant SKU
+      v.price || currentScrapedProduct.price || '0.00',          // Variant Price
       v.compare_at_price || '',                                 // Variant Compare At Price
       v.inventory_quantity || 99,                              // Variant Inventory Qty
-      imgUrl,                                                   // Image Src
-      imgUrl ? (i + 1) : ''                                     // Image Position
+      localImgName,                                             // Image Src (ZIP 文件名映射)
+      localImgName ? (i + 1) : '',                              // Image Position
+      variantImgLocalName                                       // Variant Image (ZIP 变体文件名映射)
     ];
     rows.push(row);
   }
