@@ -202,15 +202,27 @@ async function parseDomData(platform) {
       const priceEl = document.querySelector('.product-price-value') || document.querySelector('.price') || document.querySelector('[class*="price"]');
       if (priceEl) data.price = priceEl.textContent.trim().replace(/[^0-9.]/g, '');
 
-      // 提取主图，支持多种新版类名
+      // 提取主图，支持多种新版类名，增加对更多 lazyload 属性的抓取
       const imgs = Array.from(document.querySelectorAll('.images-view-item img, .image-view-magnifier-wrap img, .slider--img img, [class*="slider"] img, [class*="gallery"] img, img.magnifier-image'));
-      let rawImgs = imgs.map(img => img.src || img.getAttribute('lazy-src') || img.getAttribute('data-src')).filter(Boolean);
+      let rawImgs = imgs.map(img => {
+        return img.getAttribute('data-lazyload') || 
+               img.getAttribute('data-original') || 
+               img.getAttribute('data-src') || 
+               img.getAttribute('lazy-src') || 
+               img.getAttribute('data-lazy-src') || 
+               img.src;
+      }).filter(Boolean);
       
       // 高容错：如果未定位到足够的主图，扫描全页面托管在 ae01.alicdn.com/kf/ 的资源
       if (rawImgs.length < 2) {
         console.log('AliExpress CSS selectors matched fewer than 2 images, running full-page kf scanner...');
         const allPageImgs = Array.from(document.querySelectorAll('img')).map(img => {
-          return img.src || img.getAttribute('lazy-src') || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
+          return img.getAttribute('data-lazyload') || 
+                 img.getAttribute('data-original') || 
+                 img.getAttribute('data-src') || 
+                 img.getAttribute('lazy-src') || 
+                 img.getAttribute('data-lazy-src') || 
+                 img.src;
         }).filter(Boolean);
 
         const kfImgs = allPageImgs.filter(src => src.includes('ae01.alicdn.com/kf/') && !src.toLowerCase().endsWith('.svg'));
@@ -229,23 +241,54 @@ async function parseDomData(platform) {
       if (shopEl) data.vendor = shopEl.textContent.trim();
     }
 
-    // 详情图抓取：全局提取除了主图外，页面偏下部的其它 KF 静态大图资源
+    // 详情图抓取：优先定位详情容器，精确抓取内部所有图片（物理隔开主图与详情图，适配懒加载）
     try {
-      const allImgs = Array.from(document.querySelectorAll('img')).map(img => {
-        return img.src || img.getAttribute('lazy-src') || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
-      }).filter(Boolean);
-      const kfImgs = allImgs.filter(src => src.includes('ae01.alicdn.com/kf/') && !src.toLowerCase().endsWith('.svg'));
+      const descContainer = document.querySelector('.product-description, .detail-desc, .origin-part, .description-content, #product-description, #detail-desc, .desc-lazyload-container');
+      let detailImgs = [];
       
-      // 提取非主图的 KF 大图作为详情图
-      const cleanKfs = [...new Set(kfImgs.map(url => {
-        let clean = url.replace(/_\d+x\d+.*$/, '').replace(/_Q\d+.*$/, '').replace(/_\.webp$/, '');
-        if (clean.startsWith('//')) clean = 'https:' + clean;
-        return clean;
-      }))];
+      if (descContainer) {
+        console.log('AliExpress description container found, scanning images...');
+        const imgs = Array.from(descContainer.querySelectorAll('img'));
+        const rawDetail = imgs.map(img => {
+          return img.getAttribute('data-lazyload') || 
+                 img.getAttribute('data-original') || 
+                 img.getAttribute('data-src') || 
+                 img.getAttribute('lazy-src') || 
+                 img.getAttribute('data-lazy-src') || 
+                 img.src;
+        }).filter(Boolean);
+        
+        detailImgs = [...new Set(rawDetail.map(url => {
+          let clean = url.replace(/_\d+x\d+.*$/, '').replace(/_Q\d+.*$/, '').replace(/_\.webp$/, '');
+          if (clean.startsWith('//')) clean = 'https:' + clean;
+          return clean;
+        }))].filter(url => !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
+      }
+      
+      // 兜底方案：如果没找到容器，或者容器内无图，使用全页面 KF 排除法
+      if (detailImgs.length === 0) {
+        console.log('AliExpress description container empty or not found, falling back to full-page KF scanner...');
+        const allImgs = Array.from(document.querySelectorAll('img')).map(img => {
+          return img.getAttribute('data-lazyload') || 
+                 img.getAttribute('data-original') || 
+                 img.getAttribute('data-src') || 
+                 img.getAttribute('lazy-src') || 
+                 img.getAttribute('data-lazy-src') || 
+                 img.src;
+        }).filter(Boolean);
+        
+        const kfImgs = allImgs.filter(src => src.includes('ae01.alicdn.com/kf/') && !src.toLowerCase().endsWith('.svg'));
+        const cleanKfs = [...new Set(kfImgs.map(url => {
+          let clean = url.replace(/_\d+x\d+.*$/, '').replace(/_Q\d+.*$/, '').replace(/_\.webp$/, '');
+          if (clean.startsWith('//')) clean = 'https:' + clean;
+          return clean;
+        }))];
+        
+        detailImgs = cleanKfs.filter(url => !data.images.includes(url));
+      }
 
-      const detailCandidates = cleanKfs.filter(url => !data.images.includes(url));
-      if (detailCandidates.length > 0) {
-        data.description = detailCandidates.map(url => `<img src="${url}" />`).join('\n');
+      if (detailImgs.length > 0) {
+        data.description = detailImgs.map(url => `<img src="${url}" />`).join('\n');
       }
     } catch (e) {
       console.warn('Failed to parse AliExpress detail images:', e);
