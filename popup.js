@@ -164,6 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btnSubmitBatch').addEventListener('click', handleBatchScrape);
   document.getElementById('btnVerifyAuth').addEventListener('click', verifyAuthToken);
   document.getElementById('btnResetAuth').addEventListener('click', resetAuthToken);
+  document.getElementById('btnToggleVipTest').addEventListener('click', toggleVipTest);
   document.getElementById('btnSaveDict').addEventListener('click', saveDictConfig);
   
   // Excel 上传事件
@@ -267,6 +268,26 @@ async function verifyAuthToken() {
     userLevel = level;
     updateUserLevelBadge();
   }, 1000);
+}
+
+async function toggleVipTest() {
+  if (userLevel === 'vip') {
+    await chrome.storage.local.remove(['jwtToken', 'userLevel']);
+    document.getElementById('txtJwtToken').value = '';
+    userLevel = 'free';
+    updateUserLevelBadge();
+    showToast('测试通道：已切回普通【免费】版本。', 'info');
+  } else {
+    const testToken = 'DEVELOPER_TEST_VIP_ACTIVE';
+    await chrome.storage.local.set({
+      jwtToken: testToken,
+      userLevel: 'vip'
+    });
+    document.getElementById('txtJwtToken').value = testToken;
+    userLevel = 'vip';
+    updateUserLevelBadge();
+    showToast('测试通道：已成功一键升级为高级【VIP】！', 'success');
+  }
 }
 
 async function resetAuthToken() {
