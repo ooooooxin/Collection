@@ -410,48 +410,102 @@ async function downloadMediaZip() {
     const zip = new JSZip();
     const shouldConvert = document.getElementById('chkWebpToJpg').checked;
     
-    // 创建图片文件夹
-    const imgFolder = zip.folder("images");
+    // 创建分门别类的图片文件夹
+    const mainFolder = zip.folder("main_images");
+    const descFolder = zip.folder("desc_images");
     
-    const imageUrls = currentScrapedProduct.images || [];
-    showToast(`正在转换并打包 ${imageUrls.length} 张图片...`, 'info');
+    const mainUrls = currentScrapedProduct.images || [];
+    
+    // 匹配提取详情图
+    const descHtml = currentScrapedProduct.description || '';
+    const descUrls = [];
+    const descImgRegex = /<img[^>]+src="([^"'\s>]+)"/gi;
+    let match;
+    while ((match = descImgRegex.exec(descHtml)) !== null) {
+      descUrls.push(match[1]);
+    }
+    
+    showToast(`正在转换并打包 ${mainUrls.length} 张主图与 ${descUrls.length} 张详情图...`, 'info');
 
-    // 并行下载并转换图片
-    const downloadPromises = imageUrls.map(async (url, idx) => {
+    // 下载并转换主图
+    const mainPromises = mainUrls.map(async (url, idx) => {
       try {
-        // 1. 通过 Background.js 代理 fetch 并转为 Base64 以绕过 Canvas CORS
         const response = await new Promise((resolve) => {
           chrome.runtime.sendMessage({ action: 'proxyFetchImage', url }, resolve);
         });
 
         if (!response || !response.success) {
-          throw new Error(response?.error || '代理获取图片失败');
+          throw new Error(response?.error || '获取图片失败');
         }
 
         let fileData = response.base64;
         let ext = getFileExtension(url) || 'jpg';
         
-        // 2. 如果是 WebP 且勾选了“转 JPG”，则在 Canvas 中转换
-        if (shouldConvert && (ext.toLowerCase() === 'webp' || fileData.startsWith('data:image/webp'))) {
-          fileData = await convertWebpToJpg(fileData);
+        // 兼容处理 WebP 和 AVIF
+        const isNonJpg = ['webp', 'avif'].includes(ext.toLowerCase()) || fileData.startsWith('data:image/webp') || fileData.startsWith('data:image/avif');
+        if (shouldConvert && isNonJpg) {
+          fileData = await convertImageToJpg(fileData);
           ext = 'jpg';
         }
 
-        // 去掉 base64 的头部 data:image/xxx;base64,
         const binaryData = atob(fileData.split(',')[1]);
+        // 剔除小于 5KB 的无意义占位图或小图标
+        if (binaryData.length < 5120) {
+          console.log(`Skipped small main image (<5KB): ${url}`);
+          return;
+        }
+
         const arrayBuffer = new ArrayBuffer(binaryData.length);
         const ia = new Uint8Array(arrayBuffer);
         for (let i = 0; i < binaryData.length; i++) {
           ia[i] = binaryData.charCodeAt(i);
         }
 
-        imgFolder.file(`prod_img_${idx + 1}.${ext}`, arrayBuffer);
+        mainFolder.file(`main_img_${idx + 1}.${ext}`, arrayBuffer);
       } catch (err) {
-        console.warn(`Failed to process image ${url}:`, err);
+        console.warn(`Failed to process main image ${url}:`, err);
       }
     });
 
-    await Promise.all(downloadPromises);
+    // 下载并转换详情图
+    const descPromises = descUrls.map(async (url, idx) => {
+      try {
+        const response = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: 'proxyFetchImage', url }, resolve);
+        });
+
+        if (!response || !response.success) {
+          throw new Error(response?.error || '获取图片失败');
+        }
+
+        let fileData = response.base64;
+        let ext = getFileExtension(url) || 'jpg';
+        
+        const isNonJpg = ['webp', 'avif'].includes(ext.toLowerCase()) || fileData.startsWith('data:image/webp') || fileData.startsWith('data:image/avif');
+        if (shouldConvert && isNonJpg) {
+          fileData = await convertImageToJpg(fileData);
+          ext = 'jpg';
+        }
+
+        const binaryData = atob(fileData.split(',')[1]);
+        if (binaryData.length < 5120) {
+          console.log(`Skipped small desc image (<5KB): ${url}`);
+          return;
+        }
+
+        const arrayBuffer = new ArrayBuffer(binaryData.length);
+        const ia = new Uint8Array(arrayBuffer);
+        for (let i = 0; i < binaryData.length; i++) {
+          ia[i] = binaryData.charCodeAt(i);
+        }
+
+        descFolder.file(`desc_img_${idx + 1}.${ext}`, arrayBuffer);
+      } catch (err) {
+        console.warn(`Failed to process desc image ${url}:`, err);
+      }
+    });
+
+    await Promise.all([...mainPromises, ...descPromises]);
 
     // 3. 下载并打包主图视频
     if (currentScrapedProduct.video_url) {
@@ -497,8 +551,8 @@ async function downloadMediaZip() {
   }
 }
 
-// 纯前端 WebP 转 JPG
-async function convertWebpToJpg(base64Data) {
+// 纯前端图片格式转换（WebP、AVIF 等转为 JPG）
+async function convertImageToJpg(base64Data) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -507,7 +561,6 @@ async function convertWebpToJpg(base64Data) {
       canvas.height = img.height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0);
-      // 转为 jpg，质量 0.9
       const jpgBase64 = canvas.toDataURL('image/jpeg', 0.9);
       resolve(jpgBase64);
     };
