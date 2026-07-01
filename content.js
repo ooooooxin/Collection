@@ -533,16 +533,52 @@ async function parseDomData(platform) {
         }
       }
 
-      // 兜底 DOM 结构解析
+      // 兜底 DOM 结构解析 (全面支持 1688 新版 v-detail-k 深层 Shadow DOM 穿透提取)
       if (!data.description) {
-        const descContainer = document.querySelector('#desc-lazyload-container');
+        const descContainer = document.querySelector('#desc-lazyload-container, .collapse-body, .html-description, v-detail-k, #detail');
         if (descContainer) {
-          const lazyImgs = Array.from(descContainer.querySelectorAll('img')).map(img => {
-            return img.getAttribute('src') || img.getAttribute('lazy-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-src');
-          }).filter(Boolean);
-          if (lazyImgs.length > 0) {
-            const cleanLazy = [...new Set(lazyImgs.map(get1688HighResUrl))].filter(url => !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
-            data.description = cleanLazy.map(img => `<img src="${img}" />`).join('\n');
+          let shadowRoot = null;
+          let imgElements = [];
+
+          if (descContainer.shadowRoot) {
+            shadowRoot = descContainer.shadowRoot;
+          } else {
+            // 深度遍历所有子孙节点寻找隐藏的 shadowRoot 挂载点
+            const allChildren = descContainer.getElementsByTagName('*');
+            for (let el of allChildren) {
+              if (el.shadowRoot) {
+                shadowRoot = el.shadowRoot;
+                break;
+              }
+            }
+          }
+
+          if (shadowRoot) {
+            console.log('1688 Shadow Root detected in description, penetrating shadow DOM...');
+            imgElements = Array.from(shadowRoot.querySelectorAll('img'));
+          } else {
+            imgElements = Array.from(descContainer.querySelectorAll('img'));
+          }
+
+          if (imgElements.length > 0) {
+            const lazyImgs = imgElements.map(img => {
+              return img.getAttribute('src') || 
+                     img.getAttribute('lazy-src') || 
+                     img.getAttribute('data-lazy-src') || 
+                     img.getAttribute('data-src') ||
+                     img.getAttribute('data-lazyload') ||
+                     img.getAttribute('data-original');
+            }).filter(Boolean);
+            
+            if (lazyImgs.length > 0) {
+              const cleanLazy = [...new Set(lazyImgs.map(get1688HighResUrl))].filter(url => !url.toLowerCase().endsWith('.svg') && !url.includes('/svg/'));
+              data.description = cleanLazy.map(img => `<img src="${img}" />`).join('\n');
+              
+              // 容错：如果主图抓取为空，提取详情图前 5 张充当主图
+              if (data.images.length === 0) {
+                data.images = cleanLazy.slice(0, 5);
+              }
+            }
           }
         }
       }
