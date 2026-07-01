@@ -457,7 +457,25 @@ async function parseDomData(platform) {
     if (cleanImgs.length < 2) {
       console.log('1688 CSS selectors matched fewer than 2 images, running full-page ibank scanner...');
       const allPageImgs = Array.from(document.querySelectorAll('img')).map(img => {
-        return img.getAttrib    // 2. 提取详情图 (优先使用已渲染的本地 DOM / Shadow DOM，其次通过后台接口兜底)
+        return img.getAttribute('src') || img.getAttribute('lazy-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-src');
+      }).filter(Boolean);
+
+      const ibankImgs = allPageImgs.filter(src => {
+        const lowercaseSrc = src.toLowerCase();
+        return (lowercaseSrc.includes('cbu01.alicdn.com/img/ibank/') || lowercaseSrc.includes('img.alicdn.com/')) &&
+               !lowercaseSrc.includes('logo') && !lowercaseSrc.includes('icon') && !lowercaseSrc.includes('loading') && !lowercaseSrc.includes('avatar') &&
+               !lowercaseSrc.endsWith('.svg') && !lowercaseSrc.includes('/svg/');
+      });
+
+      const highResIbanks = [...new Set(ibankImgs.map(get1688HighResUrl))].filter(Boolean);
+      if (highResIbanks.length > 0) {
+        cleanImgs = highResIbanks.slice(0, 5);
+      }
+    }
+    
+    data.images = cleanImgs;
+
+    // 2. 提取详情图 (优先使用已渲染的本地 DOM / Shadow DOM，其次通过后台接口兜底)
     try {
       let detailImgs = [];
 
