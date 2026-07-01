@@ -479,8 +479,50 @@ async function parseDomData(platform) {
     try {
       let detailImgs = [];
 
-      // 流程 A: 本地 DOM 结构解析 (包含 v-detail-k 深层 Shadow DOM 穿透提取与推荐图过滤)
-      const descContainer = document.querySelector('#desc-lazyload-container, .collapse-body, .html-description, v-detail-k, #detail');
+      // 流程 A: 本地 DOM 结构解析 (包含动态自定义标签锁定、v-detail-x 深层 Shadow DOM 穿透与推荐图过滤)
+      // 首先通配匹配所有以 v-detail- 开头的自定义详情标签，防止混淆
+      let descContainer = document.querySelector('#desc-lazyload-container, .collapse-body, .html-description, [class*="html-description"], #detail');
+      if (!descContainer) {
+        const allElements = document.getElementsByTagName('*');
+        for (let el of allElements) {
+          if (el.tagName.toLowerCase().startsWith('v-detail-')) {
+            descContainer = el;
+            break;
+          }
+        }
+      }
+
+      // 智能唤醒懒加载：如果容器内暂无任何图片，自动瞬间滚动页面唤醒懒加载
+      let isFirstTryEmpty = true;
+      if (descContainer) {
+        const tempImgs = descContainer.shadowRoot ? descContainer.shadowRoot.querySelectorAll('img') : descContainer.querySelectorAll('img');
+        if (tempImgs.length > 0) {
+          isFirstTryEmpty = false;
+        }
+      }
+
+      if (isFirstTryEmpty) {
+        console.log('1688 detail container is empty initially, waking up lazy load...');
+        const originalScrollY = window.scrollY;
+        window.scrollTo(0, originalScrollY + 1200);
+        await new Promise(r => setTimeout(r, 400));
+        window.scrollTo(0, originalScrollY + 2400);
+        await new Promise(r => setTimeout(r, 400));
+        window.scrollTo(0, originalScrollY); // 瞬间复位
+        
+        // 滚动后重新捕获容器
+        descContainer = document.querySelector('#desc-lazyload-container, .collapse-body, .html-description, [class*="html-description"], #detail');
+        if (!descContainer) {
+          const allElements = document.getElementsByTagName('*');
+          for (let el of allElements) {
+            if (el.tagName.toLowerCase().startsWith('v-detail-')) {
+              descContainer = el;
+              break;
+            }
+          }
+        }
+      }
+
       if (descContainer) {
         let shadowRoot = null;
         let imgElements = [];
