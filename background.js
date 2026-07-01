@@ -244,6 +244,7 @@ async function scrapeSingleUrl(url) {
  */
 function detectPlatform(url) {
   const lowercaseUrl = url.toLowerCase();
+  if (lowercaseUrl.includes('ozon.ru') || lowercaseUrl.includes('ozonru.me')) return 'ozon';
   if (lowercaseUrl.includes('1688.com')) return '1688';
   if (lowercaseUrl.includes('amazon.')) return 'amazon';
   if (lowercaseUrl.includes('aliexpress.com')) return 'aliexpress';
@@ -504,6 +505,38 @@ async function parseHtmlData(html, url, platform) {
     } catch (e) {
       console.error('Failed to parse 1688 detail images in background:', e);
     }
+  } else if (platform === 'ozon') {
+    // 匹配标题
+    const titleMatch = html.match(/<h1[^>]*>([\s\S]+?)<\/h1>/i) || 
+                       html.match(/title\s*["']:\s*["']([^"']+)["']/i);
+    data.title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : 'Ozon Product';
+
+    // 价格
+    const priceMatch = html.match(/data-testid="price-value"[^>]*>([\s\S]+?)<\/span>/i) ||
+                       html.match(/price\s*["']:\s*["']([^"']+)["']/i);
+    data.price = priceMatch ? priceMatch[1].replace(/[^0-9.]/g, '') : '0.00';
+
+    // 店铺名
+    const shopMatch = html.match(/seller-name[^>]*>([\s\S]+?)<\/div>/i) ||
+                      html.match(/seller\s*["']:\s*["']([^"']+)["']/i);
+    data.vendor = shopMatch ? shopMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+
+    // 匹配大图
+    const imgMatches = [...html.matchAll(/(https?:)?\/\/ir-\d+\.ozonru\.me\/s3\/multimedia-[^\s"'\\]+?\.(jpg|png|webp|jpeg)/gi)] ||
+                       [...html.matchAll(/(https?:)?\/\/[^\s"'\\]+?ozon\.ru\/[^\s"'\\]+?\.(jpg|png|webp|jpeg)/gi)];
+    const ozonUrls = [...new Set(imgMatches.map(m => {
+      let clean = m[0].replace(/\\/g, '');
+      if (clean.startsWith('//')) clean = 'https:' + clean;
+      return getOzonHighResUrl(clean);
+    }))].filter(url => !url.toLowerCase().endsWith('.svg'));
+
+    if (ozonUrls.length > 0) {
+      data.images = ozonUrls.slice(0, 5);
+      const detailCandidates = ozonUrls.slice(5);
+      if (detailCandidates.length > 0) {
+        data.description = detailCandidates.map(url => `<img src="${url}" />`).join('\n');
+      }
+    }
   }
 
   // 兜底补齐变体
@@ -539,6 +572,10 @@ function extractIdFromUrl(url, platform) {
       const match = url.match(/\/offer\/(\d+)\.html/);
       return match ? match[1] : Date.now().toString();
     }
+    if (platform === 'ozon') {
+      const match = url.match(/-(\d+)\/?(\?.*)?$/) || url.match(/\/product\/(\d+)/i);
+      return match ? match[1] : Date.now().toString();
+    }
   } catch (e) {}
   return Date.now().toString();
 }
@@ -556,5 +593,18 @@ function get1688HighResUrl(url) {
   if (clean.startsWith('//')) {
     clean = 'https:' + clean;
   }
+  return clean;
+}
+
+/**
+ * 获取 Ozon 高清 1200px 原图
+ */
+function getOzonHighResUrl(url) {
+  if (!url) return '';
+  let clean = url;
+  if (clean.startsWith('//')) {
+    clean = 'https:' + clean;
+  }
+  clean = clean.replace(/\/wc\d+\//i, '/wc1200/');
   return clean;
 }

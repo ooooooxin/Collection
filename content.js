@@ -68,6 +68,11 @@ function detectIsProductPage() {
     return { platform: '1688' };
   }
 
+  // 5. Ozon
+  if ((url.includes('ozon.ru') || url.includes('ozonru.me')) && url.includes('/product/')) {
+    return { platform: 'ozon' };
+  }
+
   return null;
 }
 
@@ -142,7 +147,74 @@ async function parseDomData(platform) {
     options: []
   };
 
-  if (platform === 'amazon') {
+  if (platform === 'ozon') {
+    // 标题
+    const titleEl = document.querySelector('h1') || document.querySelector('[data-widget="webTitle"]');
+    if (titleEl) data.title = titleEl.textContent.trim();
+
+    // 价格
+    const priceEl = document.querySelector('[data-testid="price-value"], [class*="price-value"], [class*="price"]');
+    if (priceEl) data.price = priceEl.textContent.trim().replace(/[^0-9.]/g, '');
+
+    // 店铺名
+    const shopEl = document.querySelector('[class*="seller-name"], [class*="seller"] a, a[href*="/seller/"]');
+    if (shopEl) data.vendor = shopEl.textContent.trim();
+
+    // 1. 主图提取
+    const mainGalleryImgs = Array.from(document.querySelectorAll('[data-widget="webGallery"] img, [class*="gallery"] img, [class*="carousel"] img, img[src*="ozonru.me/s3/multimedia-"], img[src*="ozon.ru/s3/multimedia-"]'));
+    let rawImgs = mainGalleryImgs.map(img => {
+      return img.getAttribute('data-lazyload') || 
+             img.getAttribute('data-original') || 
+             img.getAttribute('data-src') || 
+             img.getAttribute('lazy-src') || 
+             img.getAttribute('data-lazy-src') || 
+             img.src;
+    }).filter(Boolean);
+
+    data.images = [...new Set(rawImgs.map(getOzonHighResUrl))].filter(url => !url.toLowerCase().endsWith('.svg') && (url.includes('ozonru.me') || url.includes('ozon.ru')));
+
+    // 2. 详情图提取
+    try {
+      const descContainer = document.querySelector('[data-widget="webDescription"], #section-description, [class*="pdp_q1a"], [class*="description"]');
+      let detailImgs = [];
+
+      if (descContainer) {
+        console.log('Ozon description container found, scanning images...');
+        const imgs = Array.from(descContainer.querySelectorAll('img'));
+        const rawDetail = imgs.map(img => {
+          return img.getAttribute('data-lazyload') || 
+                 img.getAttribute('data-original') || 
+                 img.getAttribute('data-src') || 
+                 img.getAttribute('lazy-src') || 
+                 img.getAttribute('data-lazy-src') || 
+                 img.src;
+        }).filter(Boolean);
+
+        detailImgs = [...new Set(rawDetail.map(getOzonHighResUrl))].filter(url => !url.toLowerCase().endsWith('.svg'));
+      }
+
+      if (detailImgs.length === 0) {
+        const allImgs = Array.from(document.querySelectorAll('img')).map(img => {
+          return img.getAttribute('data-lazyload') || 
+                 img.getAttribute('data-original') || 
+                 img.getAttribute('data-src') || 
+                 img.getAttribute('lazy-src') || 
+                 img.getAttribute('data-lazy-src') || 
+                 img.src;
+        }).filter(Boolean);
+
+        const ozonImgs = allImgs.filter(src => (src.includes('ozonru.me') || src.includes('ozon.ru')) && !src.toLowerCase().endsWith('.svg'));
+        detailImgs = ozonImgs.filter(url => !data.images.includes(url));
+      }
+
+      if (detailImgs.length > 0) {
+        data.description = detailImgs.map(url => `<img src="${url}" />`).join('\n');
+      }
+    } catch (e) {
+      console.warn('Failed to parse Ozon detail images:', e);
+    }
+  }
+  else if (platform === 'amazon') {
     const titleEl = document.querySelector('#productTitle');
     if (titleEl) data.title = titleEl.textContent.trim();
 
@@ -559,5 +631,19 @@ function get1688HighResUrl(url) {
   if (clean.startsWith('//')) {
     clean = 'https:' + clean;
   }
+  return clean;
+}
+
+/**
+ * 获取 Ozon 高清 1200px 原图
+ */
+function getOzonHighResUrl(url) {
+  if (!url) return '';
+  let clean = url;
+  if (clean.startsWith('//')) {
+    clean = 'https:' + clean;
+  }
+  // 将 Ozon CDN 的小图标识 /wc250/ /wc700/ 替换为最清大图 /wc1200/
+  clean = clean.replace(/\/wc\d+\//i, '/wc1200/');
   return clean;
 }
