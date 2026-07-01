@@ -323,15 +323,26 @@ async function parseDomData(platform) {
       if (shopEl) data.vendor = shopEl.textContent.trim();
     }
 
-    // 详情图抓取：优先定位详情容器，精确抓取内部所有图片（物理隔开主图与详情图，适配懒加载）
+    // 详情图抓取：优先定位详情容器（支持穿透 Shadow DOM），物理隔开主图与详情图，适配懒加载
     try {
-      const descContainer = document.querySelector('.product-description, .detail-desc, .origin-part, .description-content, #product-description, #detail-desc, .desc-lazyload-container');
+      const hostEl = document.querySelector('div[id="product-description"][class*="description"], div[class*="description--product-description"], div[data-pl="product-description"], #product-description');
       let detailImgs = [];
-      
-      if (descContainer) {
-        console.log('AliExpress description container found, scanning images...');
-        const imgs = Array.from(descContainer.querySelectorAll('img'));
-        const rawDetail = imgs.map(img => {
+      let imgElements = [];
+
+      if (hostEl && hostEl.shadowRoot) {
+        console.log('AliExpress Shadow Root detected in description, penetrating shadow DOM...');
+        const shadow = hostEl.shadowRoot;
+        imgElements = Array.from(shadow.querySelectorAll('img'));
+      } else {
+        const descContainer = document.querySelector('.product-description, .detail-desc, .origin-part, .description-content, #product-description, #detail-desc, .desc-lazyload-container');
+        if (descContainer) {
+          console.log('AliExpress description container found, scanning images...');
+          imgElements = Array.from(descContainer.querySelectorAll('img'));
+        }
+      }
+
+      if (imgElements.length > 0) {
+        const rawDetail = imgElements.map(img => {
           return img.getAttribute('data-lazyload') || 
                  img.getAttribute('data-original') || 
                  img.getAttribute('data-src') || 
